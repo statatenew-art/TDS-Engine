@@ -43,19 +43,20 @@ UI:Init(Config, Engine)
 local Features = LoadModule("Features.lua")
 Features:Init(Config, Network, Data)
 
--- 3. Ortam Kontrolü (Lobi / Maç)
-local isLobby = (PlaceId == 3260590327 or PlaceId == 5591597781)
+-- 3. Ortam Kontrolü
+-- 3260590327: Ana Lobi
+-- 5591597781: Oyun / Maç Alanı
+local isLobby = (PlaceId == 3260590327)
 
 if isLobby then
-    print("[Loader] Lobi modu devrede. Asansör yöneticisi başlatılıyor...")
+    print("[Loader] Ana lobi tespit edildi (PlaceId: 3260590327). Kuyruk yöneticisi aktif.")
     local Lobby = LoadModule("Lobby.lua")
     Lobby:Init(Config, Network)
     
-    -- Strat dosyası lobide erken çağrılsa bile metotlar nil vermesin diye Engine dönülür
     shared.TDSTable = Engine
     return shared.TDSTable
 end
 
-print("[Loader] Maç modu devrede. Strateji motoru hazır.")
+print(string.format("[Loader] Maç alanı tespit edildi (PlaceId: %d). Strateji motoru devrede!", PlaceId))
 shared.TDSTable = Engine
 return shared.TDSTable
