@@ -1,7 +1,6 @@
 -- TDS-Engine/Engine.lua
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
 
 local Engine = {
@@ -11,7 +10,8 @@ local Engine = {
     Config = nil,
     Data = nil,
     UI = nil,
-    IsPaused = false
+    IsPaused = false,
+    LoadoutMap = {} -- Kulelerin slot indeksleri
 }
 
 function Engine:Init(Config, Network, Data, UI)
@@ -30,7 +30,7 @@ function Engine:Init(Config, Network, Data, UI)
             if (over and over.Visible) or (health and health.Value <= 0) then
                 if self.UI then self.UI:SetStatus("Oyun bitti, lobiye dönülüyor...") end
                 task.wait(3)
-                TeleportService:Teleport(3260590327, LocalPlayer)
+                self.Network:BackToLobby()
                 break
             end
         end
@@ -38,42 +38,40 @@ function Engine:Init(Config, Network, Data, UI)
     print("[Engine] Motor hazır.")
 end
 
--- 1. Pause Denetleyicisi
 function Engine:TogglePause()
     self.IsPaused = not self.IsPaused
     return self.IsPaused
 end
 
 function Engine:CheckPause()
-    while self.IsPaused do
-        task.wait(0.5)
-    end
+    while self.IsPaused do task.wait(0.5) end
 end
 
--- 2. Stratejiye Özel Ayar Override Fonksiyonu
 function Engine:ApplyConfig(customConfig)
     if type(customConfig) ~= "table" then return end
     for k, v in pairs(customConfig) do
         self.Config[k] = v
-        print(string.format("[Engine] Strat ayarı uygulandı: %s = %s", tostring(k), tostring(v)))
     end
-    if self.UI then
-        self.UI:SetStatus("Özel strat ayarları yüklendi.")
-    end
+    if self.UI then self.UI:SetStatus("Özel strat ayarları yüklendi.") end
 end
 
--- Standart Metadata
-function Engine:Loadout(...) print("[Engine] Loadout:", ...) end
+-- Loadout tanımlandığında kulelerin slot indekslerini eşler
+function Engine:Loadout(...)
+    local towers = { ... }
+    for index, towerName in ipairs(towers) do
+        self.LoadoutMap[towerName] = index
+    end
+    print("[Engine] Loadout eşlendi:", table.concat(towers, ", "))
+end
+
 function Engine:Mode(m) print("[Engine] Mod:", m) end
 function Engine:GameInfo(...) end
 
--- Dalga ve Para Bekleme
 function Engine:WaitForWave(targetWave)
     if self.UI then 
-        self.UI:SetStatus(string.format("Dalga %d bekleniyor...", targetWave)) 
+        self.UI:SetStatus(string.format("Dalga %d bekleniyor...", targetWave))
         self.UI:SetWave(targetWave)
     end
-    
     while true do
         self:CheckPause()
         local cur = self.Data and self.Data:GetWave() or 0
@@ -91,24 +89,30 @@ function Engine:WaitForCash(targetCash)
     end
 end
 
-function Engine:VoteSkip(wave)
+function Engine:VoteSkip()
     self:CheckPause()
     self.Network:SkipWave()
     if self.UI then self.UI:SetStatus("Skip oyu verildi.") end
 end
 
--- Kule Eylemleri
 function Engine:Place(towerName, x, y, z)
     self:CheckPause()
     local position = Vector3.new(x, y, z)
     self.TotalTowerCount = self.TotalTowerCount + 1
     local id = self.TotalTowerCount
 
-    local towersFolder = Workspace:WaitForChild("Towers", 10)
-    if not towersFolder then return nil end
+    -- Gerekirse hotbar'da ilgili kule slotuna tıkla
+    local slot = self.LoadoutMap[towerName]
+    if slot then
+        self.Network:SelectHotbar(slot)
+        task.wait(0.1)
+    end
 
+    local towersFolder = Workspace:FindFirstChild("Towers") or Workspace:FindFirstChild("Troops")
     local existing = {}
-    for _, t in ipairs(towersFolder:GetChildren()) do existing[t] = true end
+    if towersFolder then
+        for _, t in ipairs(towersFolder:GetChildren()) do existing[t] = true end
+    end
 
     local spawnedTower = nil
     local retries = 0
@@ -119,16 +123,18 @@ function Engine:Place(towerName, x, y, z)
         self.Network:PlaceTower(towerName, position)
         task.wait(0.3)
 
-        for _, t in ipairs(towersFolder:GetChildren()) do
-            if not existing[t] and t:IsA("Model") then
-                local owner = t:FindFirstChild("Owner")
-                if not owner or owner.Value == LocalPlayer.UserId then
-                    spawnedTower = t
-                    break
+        if towersFolder then
+            for _, t in ipairs(towersFolder:GetChildren()) do
+                if not existing[t] and t:IsA("Model") then
+                    local owner = t:FindFirstChild("Owner")
+                    if not owner or owner.Value == LocalPlayer.UserId then
+                        spawnedTower = t
+                        break
+                    end
                 end
             end
         end
-    until spawnedTower or retries >= 20
+    until spawnedTower or retries >= 15
 
     if spawnedTower then
         self.Towers[id] = spawnedTower
@@ -137,7 +143,7 @@ function Engine:Place(towerName, x, y, z)
             self.UI:SetTowerCount(self.TotalTowerCount)
         end
     else
-        warn(string.format("[Engine] Kule [#%d] yerleştirilemedi!", id))
+        warn(string.format("[Engine] Kule [#%d] (%s) yerleştirilemedi!", id, towerName))
     end
 
     return id
@@ -169,10 +175,10 @@ function Engine:Upgrade(towerIndex)
         if levelVal and levelVal.Value > startLvl then
             upgraded = true
         end
-    until upgraded or attempts >= 12
+    until upgraded or attempts >= 10
 
     if upgraded and self.UI then
-        self.UI:SetStatus(string.format("Kule [%d] yükseltildi (Lv %s).", towerIndex, tostring(levelVal and levelVal.Value)))
+        self.UI:SetStatus(string.format("Kule [%d] yükseltildi.", towerIndex))
     end
 end
 
