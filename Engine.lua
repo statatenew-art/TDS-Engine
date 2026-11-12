@@ -6,38 +6,68 @@ local LocalPlayer = Players.LocalPlayer
 
 local Engine = {
     Towers = {},
-    TotalTowerCount = 0
+    TotalTowerCount = 0,
+    Network = nil,
+    Config = nil,
+    Data = nil
 }
 
-function Engine:Init(Config, Network)
+function Engine:Init(Config, Network, Data)
     self.Network = Network
     self.Config = Config
+    self.Data = Data
 
     -- Maç Sonu Takibi ve Lobiye Dönüş
     task.spawn(function()
         local gui = LocalPlayer:WaitForChild("PlayerGui", 15)
         while true do
-            task.wait(1)
+            task.wait(1.5)
             local over = gui and (gui:FindFirstChild("GameOver") or gui:FindFirstChild("Victory"))
             local health = Workspace:FindFirstChild("Health")
             if (over and over.Visible) or (health and health.Value <= 0) then
-                print("[Engine] Oyun sonlandı, lobiye dönülüyor...")
-                task.wait(3)
+                print("[Engine] Oyun sonlandı, 4 saniye sonra lobiye dönülüyor...")
+                task.wait(4)
                 TeleportService:Teleport(3260590327, LocalPlayer)
                 break
             end
         end
     end)
+    print("[Engine] Motor çekirdeği hazır.")
 end
 
+-- Metadata Tanımları (Strat dosyalarının hata vermemesi için)
 function Engine:Loadout(...) print("[Engine] Loadout:", ...) end
 function Engine:Mode(m) print("[Engine] Mod:", m) end
 function Engine:GameInfo(...) end
+
+-- Dalga ve Para Bekleme Senkronizasyonu
+function Engine:WaitForWave(targetWave)
+    print(string.format("[Engine] Dalga %d bekleniyor...", targetWave))
+    while true do
+        local cur = self.Data and self.Data:GetWave() or 0
+        if cur >= targetWave then
+            break
+        end
+        task.wait(0.4)
+    end
+    print(string.format("[Engine] Dalga %d başladı.", targetWave))
+end
+
+function Engine:WaitForCash(targetCash)
+    while true do
+        local cur = self.Data and self.Data:GetCash() or 0
+        if cur >= targetCash then
+            break
+        end
+        task.wait(0.3)
+    end
+end
 
 function Engine:VoteSkip(wave)
     self.Network:SkipWave()
 end
 
+-- Kule Yerleştirme
 function Engine:Place(towerName, x, y, z)
     local position = Vector3.new(x, y, z)
     self.TotalTowerCount = self.TotalTowerCount + 1
@@ -56,7 +86,7 @@ function Engine:Place(towerName, x, y, z)
 
     local spawnedTower = nil
     local retries = 0
-    local maxRetries = 15
+    local maxRetries = 20
 
     repeat
         retries = retries + 1
@@ -78,12 +108,13 @@ function Engine:Place(towerName, x, y, z)
         self.Towers[id] = spawnedTower
         print(string.format("[Engine] Kule [#%d] (%s) yerleştirildi.", id, towerName))
     else
-        warn(string.format("[Engine] Kule [#%d] (%s) yerleştirilemedi! (Yetersiz bakiye veya geçersiz pozisyon)", id, towerName))
+        warn(string.format("[Engine] HATA: Kule [#%d] (%s) yerleştirilemedi!", id, towerName))
     end
 
     return id
 end
 
+-- Kule Yükseltme
 function Engine:Upgrade(towerIndex)
     local waitCount = 0
     while not self.Towers[towerIndex] and waitCount < 30 do
@@ -105,26 +136,45 @@ function Engine:Upgrade(towerIndex)
     repeat
         attempts = attempts + 1
         self.Network:UpgradeTower(tower)
-        task.wait(0.4)
+        task.wait(0.35)
 
         if levelVal and levelVal.Value > startLvl then
             upgraded = true
         end
-    until upgraded or attempts >= 10
+    until upgraded or attempts >= 12
 
     if upgraded then
-        print(string.format("[Engine] Kule [#%d] yükseltildi (Yeni Seviye: %s).", towerIndex, tostring(levelVal and levelVal.Value)))
+        print(string.format("[Engine] Kule [#%d] seviye atladı (Yeni Seviye: %s).", towerIndex, tostring(levelVal and levelVal.Value)))
     else
-        warn(string.format("[Engine] Kule [#%d] yükseltilemedi (Yetersiz para veya gecikme).", towerIndex))
+        warn(string.format("[Engine] Kule [#%d] yükseltilemedi.", towerIndex))
     end
 end
 
+-- Kule Satma
 function Engine:Sell(towerIndex)
     local tower = self.Towers[towerIndex]
     if tower and tower.Parent then
         self.Network:SellTower(tower)
         self.Towers[towerIndex] = nil
         print(string.format("[Engine] Kule [#%d] satıldı.", towerIndex))
+    end
+end
+
+-- Hedefleme Değiştirme (First, Last, Strongest, Weakest, Far)
+function Engine:SetTarget(towerIndex, targetType)
+    local tower = self.Towers[towerIndex]
+    if tower and tower.Parent then
+        self.Network:SetTarget(tower, targetType)
+        print(string.format("[Engine] Kule [#%d] hedefi ayarlandı: %s", towerIndex, targetType))
+    end
+end
+
+-- Özel Yetenek Tetikleme (Örn: Call to Arms)
+function Engine:Ability(towerIndex, abilityName)
+    local tower = self.Towers[towerIndex]
+    if tower and tower.Parent then
+        self.Network:UseAbility(tower, abilityName)
+        print(string.format("[Engine] Kule [#%d] yetenek kullanıldı: %s", towerIndex, abilityName))
     end
 end
 
